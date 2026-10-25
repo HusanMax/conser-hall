@@ -295,7 +295,7 @@ export function CameraRig() {
     // OrbitControls' own middle-button dolly would fight ours — hand the
     // middle button over completely (left = rotate, right = pan).
     const controls = controlsRef.current
-    if (controls) controls.mouseButtons.MIDDLE = -1
+    if (controls) controls.mouseButtons.MIDDLE = (null as unknown as THREE.MOUSE)
 
     const pick = (clientX: number, clientY: number): THREE.Vector3 | null => {
       const rect = el.getBoundingClientRect()
