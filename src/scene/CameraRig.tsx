@@ -16,6 +16,22 @@ const STAGE_FOV = 52
 const SEAT_FOV = 62
 const UP = new THREE.Vector3(0, 1, 0)
 
+/* MMB click-to-Zoom tuning ------------------------------------------- */
+/** Closest the camera may get to the picked point. */
+const MMB_MIN_DISTANCE = 5
+/** Furthest the camera may sit from the picked point. */
+const MMB_MAX_DISTANCE = 27
+/** Radius multiplier applied on every MMB click (0.58 ≈ 1.7× closer). */
+const MMB_ZOOM_FACTOR = 0.58
+const MMB_DURATION = 0.62
+/** In seat view the camera may only lean forward a little. */
+const SEAT_DOLLY_MAX = 1.5
+/** Vertical limits for the camera body. */
+const CAM_MIN_Y = 0.8
+const CAM_MAX_Y = 14.5
+/** Pitch limits used by the seat look-around. */
+const PITCH_LIMIT = 1.25
+
 function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
 }
@@ -24,6 +40,66 @@ function quaternionFor(position: THREE.Vector3, target: THREE.Vector3): THREE.Qu
   const matrix = new THREE.Matrix4()
   matrix.lookAt(position, target, UP)
   return new THREE.Quaternion().setFromRotationMatrix(matrix)
+}
+
+/**
+ * Builds the camera position that keeps `hit` pinned under the cursor while
+ * the camera travels closer to it.
+ *
+ * The point's lateral offsets are scaled by the same ratio as its depth, so
+ * the clicked pixel stays exactly where it was on screen.
+ */
+function dollyTowardPoint(
+  camera: THREE.PerspectiveCamera,
+  hit: THREE.Vector3,
+  zoomFactor: number,
+  minDistance: number,
+  maxDistance: number,
+): { position: THREE.Vector3; depth: number } | null {
+  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion)
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion)
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion)
+
+  const rel = hit.clone().sub(camera.position)
+  const depth = rel.dot(forward)
+  if (depth <= 0.05) return null
+
+  const lateralX = rel.dot(right)
+  const lateralY = rel.dot(up)
+
+  const nextDepth = THREE.MathUtils.clamp(depth * zoomFactor, minDistance, maxDistance)
+  const ratio = nextDepth / depth
+
+  const position = camera.position
+    .clone()
+    .addScaledVector(forward, depth - nextDepth)
+    .addScaledVector(right, lateralX * (1 - ratio))
+    .addScaledVector(up, lateralY * (1 - ratio))
+
+  // Keep the new orbit radius inside the allowed band.
+  const radius = position.distanceTo(hit)
+  if (radius < minDistance || radius > maxDistance) {
+    const clamped = THREE.MathUtils.clamp(radius, minDistance, maxDistance)
+    position.copy(hit).add(position.clone().sub(hit).setLength(clamped))
+  }
+
+  return { position, depth: nextDepth }
+}
+
+/** Collects the meshes that can be picked (hidden batch sources are skipped). */
+function pickables(scene: THREE.Object3D): THREE.Object3D[] {
+  const out: THREE.Object3D[] = []
+  scene.traverse((obj) => {
+    if (!(obj as THREE.Mesh).isMesh) return
+    // A mesh is only pickable when it and every ancestor are visible.
+    let node: THREE.Object3D | null = obj
+    while (node) {
+      if (!node.visible) return
+      node = node.parent
+    }
+    out.push(obj)
+  })
+  return out
 }
 
 interface Transition {
@@ -39,10 +115,28 @@ interface Transition {
   kind: 'orbit' | 'seat'
 }
 
+interface MmbZoom {
+  start: number
+  duration: number
+  kind: 'orbit' | 'seat'
+  fromPos: THREE.Vector3
+  toPos: THREE.Vector3
+  fromQuat: THREE.Quaternion
+  toQuat: THREE.Quaternion
+  fromTarget: THREE.Vector3
+  toTarget: THREE.Vector3
+  fromBaseYaw: number
+  fromBasePitch: number
+  toBaseYaw: number
+  toBasePitch: number
+}
+
 export function CameraRig() {
-  const { camera, gl } = useThree()
+  const { camera, gl, scene } = useThree()
   const controlsRef = useRef<OrbitControlsImpl>(null)
   const transitionRef = useRef<Transition | null>(null)
+  const mmbZoomRef = useRef<MmbZoom | null>(null)
+  const pickRaycaster = useMemo(() => new THREE.Raycaster(), [])
   const seatLook = useRef({
     baseYaw: 0,
     basePitch: 0,
@@ -95,6 +189,9 @@ export function CameraRig() {
       duration = 1.45
     }
 
+    // a running MMB zoom is superseded by an explicit camera command
+    mmbZoomRef.current = null
+
     controls.enabled = false
     const toQuat =
       mode === 'seat'
@@ -146,7 +243,7 @@ export function CameraRig() {
       look.lastX = e.clientX
       look.lastY = e.clientY
       look.yaw -= dx * 0.0042
-      look.pitch = THREE.MathUtils.clamp(look.pitch - dy * 0.0036, -1.25, 1.25)
+      look.pitch = THREE.MathUtils.clamp(look.pitch - dy * 0.0036, -PITCH_LIMIT, PITCH_LIMIT)
     }
 
     const onPointerUp = () => {
@@ -157,8 +254,8 @@ export function CameraRig() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'ArrowLeft') seatLook.current.yaw += 0.07
       else if (e.key === 'ArrowRight') seatLook.current.yaw -= 0.07
-      else if (e.key === 'ArrowUp') seatLook.current.pitch = THREE.MathUtils.clamp(seatLook.current.pitch + 0.05, -1.25, 1.25)
-      else if (e.key === 'ArrowDown') seatLook.current.pitch = THREE.MathUtils.clamp(seatLook.current.pitch - 0.05, -1.25, 1.25)
+      else if (e.key === 'ArrowUp') seatLook.current.pitch = THREE.MathUtils.clamp(seatLook.current.pitch + 0.05, -PITCH_LIMIT, PITCH_LIMIT)
+      else if (e.key === 'ArrowDown') seatLook.current.pitch = THREE.MathUtils.clamp(seatLook.current.pitch - 0.05, -PITCH_LIMIT, PITCH_LIMIT)
       else return
       e.preventDefault()
     }
@@ -177,6 +274,137 @@ export function CameraRig() {
       seatLook.current.dragging = false
     }
   }, [mode, gl])
+
+  /**
+   * MMB click-to-Zoom.
+   *
+   * A middle-button press ray-casts into the auditorium, finds the 3-D point
+   * under the cursor and flies the camera toward exactly that point. The
+   * clicked pixel stays anchored while the camera closes in, and the point
+   * becomes the new orbit target so repeated clicks keep travelling inward.
+   *
+   * Only `button === 1` is handled, so left-click seat picking and right-click
+   * panning are untouched. The browser's middle-click autoscroll is suppressed.
+   */
+  useEffect(() => {
+    const el = gl.domElement
+    const perspective = camera as THREE.PerspectiveCamera
+
+    // OrbitControls' own middle-button dolly would fight ours — hand the
+    // middle button over completely (left = rotate, right = pan).
+    const controls = controlsRef.current
+    if (controls) controls.mouseButtons.MIDDLE = -1
+
+    const pick = (clientX: number, clientY: number): THREE.Vector3 | null => {
+      const rect = el.getBoundingClientRect()
+      if (!rect.width || !rect.height) return null
+      const ndc = new THREE.Vector2(
+        ((clientX - rect.left) / rect.width) * 2 - 1,
+        -((clientY - rect.top) / rect.height) * 2 + 1,
+      )
+      pickRaycaster.setFromCamera(ndc, perspective)
+      const hits = pickRaycaster.intersectObjects(pickables(scene), false)
+      return hits.length ? hits[0].point.clone() : null
+    }
+
+    const onPointerDown = (e: PointerEvent) => {
+      // middle button only — left and right clicks are left alone
+      if (e.button !== 1) return
+
+      // suppress the browser's middle-click autoscroll / paste-and-scroll
+      e.preventDefault()
+
+      // ignore while an explicit camera move is playing
+      if (transitionRef.current) return
+
+      const hit = pick(e.clientX, e.clientY)
+      if (!hit) return
+
+      const now = performance.now()
+      const look = seatLook.current
+
+      if (mode === 'seat') {
+        // Seat view is a fixed vantage point: lean toward the picked spot and
+        // re-aim the look-around origin at it, without breaking the drag.
+        const dir = hit.clone().sub(perspective.position)
+        const dist = dir.length()
+        if (dist < 0.4) return
+        const step = Math.min(dist * 0.35, SEAT_DOLLY_MAX)
+        const toPos = perspective.position.clone().add(dir.normalize().multiplyScalar(step))
+        toPos.y = THREE.MathUtils.clamp(
+          toPos.y,
+          (seat?.position[1] ?? 0) + 0.9,
+          CAM_MAX_Y,
+        )
+
+        const aim = hit.clone().sub(toPos).normalize()
+        const targetPitch = THREE.MathUtils.clamp(Math.asin(aim.y), -PITCH_LIMIT, PITCH_LIMIT)
+        const targetYaw = Math.atan2(-aim.x, -aim.z)
+
+        mmbZoomRef.current = {
+          start: now,
+          duration: MMB_DURATION,
+          kind: 'seat',
+          fromPos: perspective.position.clone(),
+          toPos,
+          fromQuat: perspective.quaternion.clone(),
+          toQuat: quaternionFor(toPos, hit),
+          fromTarget: new THREE.Vector3(),
+          toTarget: new THREE.Vector3(),
+          fromBaseYaw: look.baseYaw,
+          fromBasePitch: look.basePitch,
+          toBaseYaw: targetYaw - look.yaw,
+          toBasePitch: targetPitch - look.pitch,
+        }
+        return
+      }
+
+      const orbit = controlsRef.current
+      if (!orbit) return
+
+      const moved = dollyTowardPoint(
+        perspective,
+        hit,
+        MMB_ZOOM_FACTOR,
+        MMB_MIN_DISTANCE,
+        MMB_MAX_DISTANCE,
+      )
+      if (!moved) return
+
+      const toPos = moved.position
+      toPos.y = THREE.MathUtils.clamp(toPos.y, CAM_MIN_Y, CAM_MAX_Y)
+
+      orbit.enabled = false
+      mmbZoomRef.current = {
+        start: now,
+        duration: MMB_DURATION,
+        kind: 'orbit',
+        fromPos: perspective.position.clone(),
+        toPos,
+        fromQuat: perspective.quaternion.clone(),
+        toQuat: quaternionFor(toPos, hit),
+        fromTarget: orbit.target.clone(),
+        toTarget: hit.clone(),
+        fromBaseYaw: 0,
+        fromBasePitch: 0,
+        toBaseYaw: 0,
+        toBasePitch: 0,
+      }
+    }
+
+    // Belt-and-braces: some browsers only kick off the autoscroll on auxclick.
+    const onAuxClick = (e: MouseEvent) => {
+      if (e.button === 1) e.preventDefault()
+    }
+
+    el.addEventListener('pointerdown', onPointerDown)
+    el.addEventListener('auxclick', onAuxClick)
+
+    return () => {
+      el.removeEventListener('pointerdown', onPointerDown)
+      el.removeEventListener('auxclick', onAuxClick)
+    }
+  }, [gl, camera, scene, pickRaycaster, mode, seat])
 
   useFrame(() => {
     if (mode === 'seat') {
@@ -217,6 +445,36 @@ export function CameraRig() {
         }
       }
       return
+    }
+
+    const zoom = mmbZoomRef.current
+    if (zoom) {
+      const t = Math.min(1, (performance.now() - zoom.start) / (zoom.duration * 1000))
+      const eased = easeInOutCubic(t)
+      camera.position.lerpVectors(zoom.fromPos, zoom.toPos, eased)
+
+      const controls = controlsRef.current
+      if (zoom.kind === 'orbit') {
+        camera.quaternion.slerpQuaternions(zoom.fromQuat, zoom.toQuat, eased)
+        if (controls) controls.target.lerpVectors(zoom.fromTarget, zoom.toTarget, eased)
+      } else {
+        const look = seatLook.current
+        look.baseYaw = THREE.MathUtils.lerp(zoom.fromBaseYaw, zoom.toBaseYaw, eased)
+        look.basePitch = THREE.MathUtils.lerp(zoom.fromBasePitch, zoom.toBasePitch, eased)
+      }
+
+      if (t >= 1) {
+        camera.position.copy(zoom.toPos)
+        if (zoom.kind === 'orbit') {
+          camera.quaternion.copy(zoom.toQuat)
+          if (controls) {
+            controls.target.copy(zoom.toTarget)
+            controls.enabled = true
+            controls.update()
+          }
+        }
+        mmbZoomRef.current = null
+      }
     }
 
     if (mode === 'seat') {

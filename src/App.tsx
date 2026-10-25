@@ -9,6 +9,7 @@ import { SeatViewHUD } from './components/ui/SeatViewHUD'
 import { CheckoutModal } from './components/ui/CheckoutModal'
 import { IntroCurtain } from './components/ui/IntroCurtain'
 import { Toast } from './components/ui/Toast'
+import { CursorFollower } from './components/ui/CursorFollower'
 import { useBookingStore } from './store/bookingStore'
 
 export default function App() {
@@ -92,6 +93,7 @@ export default function App() {
       <CheckoutModal />
       <Toast />
       <IntroCurtain />
+      <CursorFollower />
     </main>
   )
 }
