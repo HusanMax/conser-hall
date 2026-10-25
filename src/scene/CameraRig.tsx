@@ -29,6 +29,8 @@ const SEAT_DOLLY_MAX = 1.5
 /** Vertical limits for the camera body. */
 const CAM_MIN_Y = 0.8
 const CAM_MAX_Y = 14.5
+const HALL_RADIUS = 30.5 // Slightly less than the wall radius of 31.3
+const HALL_CENTER = new THREE.Vector3(0, 0, -13)
 /** Pitch limits used by the seat look-around. */
 const PITCH_LIMIT = 1.25
 
@@ -481,6 +483,15 @@ export function CameraRig() {
       const look = seatLook.current
       camera.rotation.set(look.basePitch + look.pitch, look.baseYaw + look.yaw, 0, 'YXZ')
     }
+
+    // Keep camera within hall boundaries
+    const horizontalDist = Math.hypot(camera.position.x - HALL_CENTER.x, camera.position.z - HALL_CENTER.z)
+    if (horizontalDist > HALL_RADIUS) {
+      const angle = Math.atan2(camera.position.x - HALL_CENTER.x, camera.position.z - HALL_CENTER.z)
+      camera.position.x = HALL_CENTER.x + Math.sin(angle) * HALL_RADIUS
+      camera.position.z = HALL_CENTER.z + Math.cos(angle) * HALL_RADIUS
+    }
+    camera.position.y = THREE.MathUtils.clamp(camera.position.y, CAM_MIN_Y, CAM_MAX_Y)
   })
 
   return (

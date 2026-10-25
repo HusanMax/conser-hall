@@ -10,6 +10,7 @@ import { CheckoutModal } from './components/ui/CheckoutModal'
 import { IntroCurtain } from './components/ui/IntroCurtain'
 import { Toast } from './components/ui/Toast'
 import { CursorFollower } from './components/ui/CursorFollower'
+import { AudioProvider } from './components/ui/AudioController'
 import { useBookingStore } from './store/bookingStore'
 
 export default function App() {
@@ -43,8 +44,9 @@ export default function App() {
   }, [checkoutOpen, focusStage, goOverview])
 
   return (
-    <main className="relative h-full w-full overflow-hidden bg-[#08070a]">
-      <Scene />
+    <AudioProvider>
+      <main className="relative h-full w-full overflow-hidden bg-[#08070a]">
+        <Scene />
 
       {/* cinematic overlays */}
       <div className="vignette pointer-events-none absolute inset-0 z-10" />
@@ -95,5 +97,6 @@ export default function App() {
       <IntroCurtain />
       <CursorFollower />
     </main>
-  )
+    </AudioProvider>
+  );
 }

@@ -7,6 +7,7 @@ import { HallShell } from './HallShell'
 import { InstancedSeats } from './InstancedSeats'
 import { StageArea } from './StageArea'
 import { CameraRig } from './CameraRig'
+import { PianoNotes } from './PianoNotes'
 
 function HallLighting() {
   return (
@@ -90,6 +91,7 @@ export function Scene() {
         <AuditoriumCeiling />
         <InstancedSeats />
         <CameraRig />
+        <PianoNotes />
         <Preload all />
       </Suspense>
     </Canvas>

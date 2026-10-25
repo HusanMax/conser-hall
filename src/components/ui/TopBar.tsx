@@ -7,9 +7,14 @@ import {
   Minimize2,
   Orbit,
   Rows3,
+  Volume2,
+  VolumeX,
+  Play,
+  Pause,
 } from 'lucide-react'
 import { EVENT } from '../../data/hall'
 import { useBookingStore } from '../../store/bookingStore'
+import { useAudio } from './AudioController'
 
 function HoverLabel({ children }: { children: React.ReactNode }) {
   return (
@@ -23,6 +28,7 @@ export function TopBar() {
   const mode = useBookingStore((s) => s.cameraMode)
   const goOverview = useBookingStore((s) => s.goOverview)
   const focusStage = useBookingStore((s) => s.focusStage)
+  const { isPlaying, isMuted, togglePlay, toggleMute } = useAudio()
   const [fullscreen, setFullscreen] = useState(false)
 
   useEffect(() => {
@@ -76,6 +82,24 @@ export function TopBar() {
         </div>
 
         <div className="pointer-events-auto flex items-center gap-2">
+          <button
+            onClick={togglePlay}
+            aria-label={isPlaying ? 'Pause music' : 'Play music'}
+            className="icon-btn group relative h-10 w-10 rounded-full focus-ring"
+            title={isPlaying ? 'Pause music' : 'Play music'}
+          >
+            {isPlaying ? <Pause className="h-4 w-4" strokeWidth={1.6} /> : <Play className="h-4 w-4" strokeWidth={1.6} />}
+            <HoverLabel>{isPlaying ? 'Pause' : 'Play'}</HoverLabel>
+          </button>
+          <button
+            onClick={toggleMute}
+            aria-label={isMuted ? 'Unmute music' : 'Mute music'}
+            className="icon-btn group relative h-10 w-10 rounded-full focus-ring"
+            title={isMuted ? 'Unmute music' : 'Mute music'}
+          >
+            {isMuted ? <VolumeX className="h-4 w-4" strokeWidth={1.6} /> : <Volume2 className="h-4 w-4" strokeWidth={1.6} />}
+            <HoverLabel>{isMuted ? 'Unmute' : 'Mute'}</HoverLabel>
+          </button>
           <button
             onClick={goOverview}
             aria-label="Reset to hall overview"

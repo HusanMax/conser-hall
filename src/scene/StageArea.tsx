@@ -282,6 +282,11 @@ export function StageArea() {
         <boxGeometry args={[26.6, 0.68, 0.5]} />
         <meshStandardMaterial color="#08080a" roughness={0.35} metalness={0.4} />
       </mesh>
+      {/* Closed apron edge */}
+      <mesh position={[0, -0.33, -12.37]}>
+        <boxGeometry args={[26.6, 0.68, 0.05]} />
+        <meshStandardMaterial color="#08080a" roughness={0.35} metalness={0.4} />
+      </mesh>
       <mesh position={[0, 0.025, -12.84]}>
         <boxGeometry args={[26.6, 0.035, 0.1]} />
         <meshBasicMaterial color="#e6bd6b" toneMapped={false} />
